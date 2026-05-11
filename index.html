@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Argos AI Sentinel</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #58a6ff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        header {
+            background-color: #161b22;
+            width: 100%;
+            padding: 15px;
+            text-align: center;
+            border-bottom: 2px solid #30363d;
+            margin-bottom: 20px;
+        }
+        #viewer-container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #30363d;
+        }
+        video, canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .status-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 5px;
+            width: 80%;
+            max-width: 600px;
+        }
+        .alert {
+            color: #f85149;
+            font-weight: bold;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>ARGOS AI: SENTINEL V1.0</h1>
+    </header>
+
+    <div id="viewer-container">
+        <video id="webcam" autoplay playsinline width="640" height="480"></video>
+        <canvas id="overlay"></canvas>
+    </div>
+
+    <div class="status-panel">
+        <p id="status">INICIALIZANDO SISTEMA...</p>
+        <div id="detections">Esperando señal de video...</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay');
+        const status = document.getElementById('status');
+        const ctx = canvas.getContext('2d');
+
+        async function init() {
+            try {
+                status.innerText = "CARGANDO MODELO IA...";
+                // Cargamos el modelo que está en la misma carpeta
+                const model = await tf.loadGraphModel('model.json');
+                status.innerText = "SISTEMA ACTIVO - VIGILANDO";
+
+                // Acceso a la cámara trasera (environment)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" },
+                    audio: false
+                });
+                video.srcObject = stream;
+
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    detectFrame(model);
+                };
+            } catch (e) {
+                status.innerText = "ERROR DE SISTEMA: " + e.message;
+                console.error(e);
+            }
+        }
+
+        async function detectFrame(model) {
+            // Convertimos el frame del video en un tensor
+            const tensor = tf.browser.fromPixels(video)
+                .resizeNearestNeighbor([640, 640])
+                .toFloat()
+                .expandDims();
+
+            // Ejecutamos la predicción
+            const predictions = await model.executeAsync(tensor);
+            
+            // Limpiamos el canvas para dibujar lo nuevo
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Lógica de dibujo (esto varía según cómo exportaste el modelo)
+            // Por ahora, dibujamos un indicador de que el proceso está corriendo
+            ctx.strokeStyle = "#00ff00";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(10, 10, 50, 20); 
+
+            // Liberamos memoria
+            tf.dispose(tensor);
+            tf.dispose(predictions);
+
+            requestAnimationFrame(() => detectFrame(model));
+        }
+
+        init();
+    </script>
+</body>
+</html>
