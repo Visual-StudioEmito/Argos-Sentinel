@@ -12,20 +12,18 @@
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
         .status-panel { margin-top: 20px; padding: 15px; background: #161b22; border: 1px solid #30363d; border-radius: 5px; width: 85%; max-width: 600px; font-family: monospace; }
         .active { color: #39d353; }
-        .error { color: #f85149; }
+        .error { color: #f85149; font-size: 12px; }
     </style>
 </head>
 <body>
     <header><h1>ARGOS AI: SENTINEL V1.0</h1></header>
-    
     <div id="viewer-container">
         <video id="webcam" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
     </div>
-
     <div class="status-panel">
         <p id="status">SISTEMA: INICIALIZANDO...</p>
-        <div id="log">Preparando motor de IA...</div>
+        <div id="log">Preparando motor binario...</div>
     </div>
 
     <script>
@@ -37,21 +35,22 @@
 
         async function init() {
             try {
-                // 1. Forzamos modo CPU para evitar errores de memoria en iPhone
-                log.innerText = "Configurando backend...";
-                await tf.setBackend('cpu'); 
-                
-                // 2. Cargamos el modelo con limpieza de caché forzada
-                log.innerText = "Cargando shards desde GitHub...";
+                // Paso 1: Forzar CPU para evitar fallos de buffer en la GPU del iPhone
+                log.innerText = "Configurando entorno de ejecución...";
+                await tf.setBackend('cpu');
+                await tf.ready();
+
+                // Paso 2: Cargar el modelo con un bypass de caché
+                log.innerText = "Descargando Shards (bloques de memoria)...";
                 const model = await tf.loadGraphModel('model.json', {
-                    fetchFunc: (url, options) => fetch(url, { ...options, cache: 'no-store' })
+                    onProgress: (p) => log.innerText = `Cargando: ${(p * 100).toFixed(0)}%`,
+                    fetchFunc: (url, options) => fetch(url, { ...options, cache: 'no-cache' })
                 });
                 
                 status.innerText = "SISTEMA: ONLINE";
                 status.className = "active";
-                log.innerText = "Modelo cargado. Accediendo a cámara...";
+                log.innerText = "IA lista. Iniciando visión...";
 
-                // 3. Configuración de cámara
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: "environment" },
                     audio: false
@@ -64,15 +63,13 @@
                     detect(model);
                 };
             } catch (e) {
-                status.innerText = "SISTEMA: ERROR";
+                status.innerText = "SISTEMA: FALLO DE INTEGRIDAD";
                 status.className = "error";
-                log.innerText = e.message;
-                console.error(e);
+                log.innerHTML = `ERROR: ${e.message}<br><br>Sugerencia: Resube los archivos .bin a GitHub uno por uno.`;
             }
         }
 
         async function detect(model) {
-            // Usamos executeAsync para modelos YOLO tipo Graph
             const predictions = await tf.tidy(() => {
                 const img = tf.browser.fromPixels(video)
                     .resizeNearestNeighbor([640, 640])
@@ -83,19 +80,13 @@
             });
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Dibujamos el visor visual
             ctx.strokeStyle = "#39d353";
             ctx.lineWidth = 3;
-            ctx.strokeRect(50, 50, canvas.width - 100, canvas.height - 100);
+            ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - 80);
 
-            // Limpieza estricta de tensores
             if (predictions) {
-                if (Array.isArray(predictions)) {
-                    predictions.forEach(t => t.dispose());
-                } else {
-                    predictions.dispose();
-                }
+                if (Array.isArray(predictions)) predictions.forEach(t => t.dispose());
+                else predictions.dispose();
             }
 
             requestAnimationFrame(() => detect(model));
