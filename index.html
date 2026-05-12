@@ -25,7 +25,7 @@
 
     <div class="status-panel">
         <p id="status">SISTEMA: INICIALIZANDO...</p>
-        <div id="log">Cargando 3 shards de memoria...</div>
+        <div id="log">Preparando motor de IA...</div>
     </div>
 
     <script>
@@ -37,13 +37,21 @@
 
         async function init() {
             try {
-                // Cargamos el modelo (el .json buscará los 3 .bin automáticamente)
-                const model = await tf.loadGraphModel('model.json');
+                // 1. Forzamos modo CPU para evitar errores de memoria en iPhone
+                log.innerText = "Configurando backend...";
+                await tf.setBackend('cpu'); 
+                
+                // 2. Cargamos el modelo con limpieza de caché forzada
+                log.innerText = "Cargando shards desde GitHub...";
+                const model = await tf.loadGraphModel('model.json', {
+                    fetchFunc: (url, options) => fetch(url, { ...options, cache: 'no-store' })
+                });
                 
                 status.innerText = "SISTEMA: ONLINE";
                 status.className = "active";
-                log.innerText = "Modelo YOLO cargado. Iniciando cámara...";
+                log.innerText = "Modelo cargado. Accediendo a cámara...";
 
+                // 3. Configuración de cámara
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: "environment" },
                     audio: false
@@ -53,17 +61,18 @@
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    detect(model); // Aquí llamamos a la función de detección
+                    detect(model);
                 };
             } catch (e) {
                 status.innerText = "SISTEMA: ERROR";
                 status.className = "error";
                 log.innerText = e.message;
+                console.error(e);
             }
         }
 
-        // AQUÍ ES DONDE VA LA FUNCIÓN POR LA QUE PREGUNTASTE:
         async function detect(model) {
+            // Usamos executeAsync para modelos YOLO tipo Graph
             const predictions = await tf.tidy(() => {
                 const img = tf.browser.fromPixels(video)
                     .resizeNearestNeighbor([640, 640])
@@ -75,15 +84,18 @@
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Cuadro de escaneo visual
+            // Dibujamos el visor visual
             ctx.strokeStyle = "#39d353";
             ctx.lineWidth = 3;
             ctx.strokeRect(50, 50, canvas.width - 100, canvas.height - 100);
 
-            // Liberamos memoria de las predicciones
+            // Limpieza estricta de tensores
             if (predictions) {
-                if (Array.isArray(predictions)) predictions.forEach(t => t.dispose());
-                else predictions.dispose();
+                if (Array.isArray(predictions)) {
+                    predictions.forEach(t => t.dispose());
+                } else {
+                    predictions.dispose();
+                }
             }
 
             requestAnimationFrame(() => detect(model));
