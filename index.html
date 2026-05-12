@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Argos AI Sentinel</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0"></script>
     <style>
         body {
             background-color: #0d1117;
@@ -14,6 +14,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            overflow-x: hidden;
         }
         header {
             background-color: #161b22;
@@ -25,8 +26,9 @@
         }
         #viewer-container {
             position: relative;
-            width: 640px;
-            height: 480px;
+            width: 90vw;
+            max-width: 640px;
+            aspect-ratio: 4/3;
             background: #000;
             border-radius: 8px;
             overflow: hidden;
@@ -36,6 +38,9 @@
             position: absolute;
             top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
         .status-panel {
             margin-top: 20px;
@@ -43,19 +48,13 @@
             background: #161b22;
             border: 1px solid #30363d;
             border-radius: 5px;
-            width: 80%;
+            width: 85%;
             max-width: 600px;
         }
-        .alert {
-            color: #f85149;
-            font-weight: bold;
-            animation: blink 1s infinite;
-        }
-        @keyframes blink {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
+        #status { font-weight: bold; }
+        .loading { color: #f1e05a; }
+        .active { color: #39d353; }
+        .error { color: #f85149; }
     </style>
 </head>
 <body>
@@ -65,13 +64,13 @@
     </header>
 
     <div id="viewer-container">
-        <video id="webcam" autoplay playsinline width="640" height="480"></video>
+        <video id="webcam" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
     </div>
 
     <div class="status-panel">
-        <p id="status">INICIALIZANDO SISTEMA...</p>
-        <div id="detections">Esperando señal de video...</div>
+        <p id="status" class="loading">INICIALIZANDO SISTEMA...</p>
+        <div id="detections">Esperando acceso a periféricos...</div>
     </div>
 
     <script>
@@ -82,14 +81,19 @@
 
         async function init() {
             try {
-                status.innerText = "CARGANDO MODELO IA...";
+                status.innerText = "CONECTANDO CON MOTOR IA...";
                 
-                // Cargamos el modelo. Si usas GitHub Pages, asegúrate de que la ruta sea correcta.
-                const model = await tf.loadGraphModel('model.json');
+                // Cargamos el modelo con una configuración de reintento para Safari
+                const model = await tf.loadGraphModel('model.json', {
+                    onProgress: (p) => {
+                        status.innerText = `CARGANDO: ${Math.round(p * 100)}%`;
+                    }
+                });
                 
-                status.innerText = "SISTEMA ACTIVO - VIGILANDO";
+                status.innerText = "SISTEMA ACTIVO";
+                status.className = "active";
 
-                // Acceso a la cámara trasera optimizado para móviles
+                // Configuración de cámara trasera
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         facingMode: "environment",
@@ -106,45 +110,45 @@
                     detectFrame(model);
                 };
             } catch (e) {
-                status.innerText = "ERROR DE SISTEMA: " + e.message;
+                status.innerText = "FALLO TÉCNICO: " + e.message;
+                status.className = "error";
                 console.error(e);
             }
         }
 
         async function detectFrame(model) {
-            // Empaquetamos todo en tf.tidy para evitar fugas de memoria (memory leaks)
-            tf.tidy(() => {
-                // 1. Convertimos el frame en tensor
-                // 2. Redimensionamos a 640x640 (lo que espera YOLO)
-                // 3. Normalizamos los píxeles de 0-255 a 0-1
-                const tensor = tf.browser.fromPixels(video)
+            // tf.tidy limpia automáticamente los tensores para no saturar el iPhone
+            const predictions = await tf.tidy(() => {
+                const input = tf.browser.fromPixels(video)
                     .resizeNearestNeighbor([640, 640])
                     .toFloat()
-                    .div(tf.scalar(255.0)) 
-                    .expandDims();
-
-                // Ejecutamos la predicción
-                model.executeAsync(tensor).then(predictions => {
-                    // Limpiamos el canvas
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    
-                    // Indicador de escaneo (cuadrado verde en la esquina)
-                    ctx.strokeStyle = "#00ff00";
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(20, 20, 40, 40); 
-
-                    // Liberamos los tensores de la predicción
-                    if (Array.isArray(predictions)) {
-                        predictions.forEach(p => p.dispose());
-                    } else {
-                        predictions.dispose();
-                    }
-                });
+                    .div(255.0) // Normalización crucial para YOLO
+                    .expandDims(0);
+                
+                return model.executeAsync(input);
             });
+
+            // Limpieza y dibujo básico
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Cuadro de escaneo visual
+            ctx.strokeStyle = "#39d353";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+            ctx.setLineDash([]);
+
+            // Liberamos la predicción de la memoria
+            if (Array.isArray(predictions)) {
+                predictions.forEach(p => p.dispose());
+            } else {
+                predictions.dispose();
+            }
 
             requestAnimationFrame(() => detectFrame(model));
         }
 
+        // Arrancar aplicación
         init();
     </script>
 </body>
